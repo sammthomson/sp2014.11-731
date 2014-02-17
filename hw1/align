@@ -1,39 +1,85 @@
 #!/usr/bin/env python
+import codecs
+from collections import defaultdict
 import optparse
 import sys
-from collections import defaultdict
+from itertools import islice, product
+from operator import itemgetter as ig
 
-optparser = optparse.OptionParser()
-optparser.add_option("-b", "--bitext", dest="bitext", default="data/dev-test-train.de-en", help="Parallel corpus (default data/dev-test-train.de-en)")
-optparser.add_option("-t", "--threshold", dest="threshold", default=0.5, type="float", help="Threshold for aligning with Dice's coefficient (default=0.5)")
-optparser.add_option("-n", "--num_sentences", dest="num_sents", default=sys.maxint, type="int", help="Number of sentences to use for training and alignment")
-(opts, _) = optparser.parse_args()
 
-sys.stderr.write("Training with Dice's coefficient...")
-bitext = [[sentence.strip().split() for sentence in pair.split(' ||| ')] for pair in open(opts.bitext)][:opts.num_sents]
-f_count = defaultdict(int)
-e_count = defaultdict(int)
-fe_count = defaultdict(int)
-for (n, (f, e)) in enumerate(bitext):
-  for f_i in set(f):
-    f_count[f_i] += 1
-    for e_j in set(e):
-      fe_count[(f_i,e_j)] += 1
-  for e_j in set(e):
-    e_count[e_j] += 1
-  if n % 500 == 0:
-    sys.stderr.write(".")
+def read_sentence_pairs(bitext_filename, num_sentences):
+    with codecs.open(bitext_filename, encoding="utf-8") as bitext_file:
+        for pair in islice(bitext_file, num_sentences):
+            yield tuple(sentence.strip().split() for sentence in pair.split(' ||| '))
 
-dice = defaultdict(int)
-for (k, (f_i, e_j)) in enumerate(fe_count.keys()):
-  dice[(f_i,e_j)] = 2.0 * fe_count[(f_i, e_j)] / (f_count[f_i] + e_count[e_j])
-  if k % 5000 == 0:
-    sys.stderr.write(".")
-sys.stderr.write("\n")
 
-for (f, e) in bitext:
-  for (i, f_i) in enumerate(f): 
-    for (j, e_j) in enumerate(e):
-      if dice[(f_i,e_j)] >= opts.threshold:
-        sys.stdout.write("%i-%i " % (i,j))
-  sys.stdout.write("\n")
+def dice_coefficients(pair_counts, source_counts, target_counts, threshold):
+    """
+    Calculates the dice coefficients for all pairs of tokens
+    Dice(A, B) := | A.intersection(B) | / | A.union(B) |
+    """
+    sys.stderr.write("calculating Dice similarities\n")
+    dices = {}
+    for (i, ((source_token, target_token), pair_count)) in enumerate(pair_counts.iteritems()):
+        dice = 1.0 * pair_count / (source_counts[source_token] + target_counts[target_token] - pair_count)
+        if dice >= threshold:
+            dices[(source_token, target_token)] = dice
+        if i % 5000 == 0:
+            sys.stderr.write(".")
+    sys.stderr.write("\n")
+    return dices
+
+
+def sentence_counts(bitext):
+    sys.stderr.write("counting word/sentence co-occurrences.\n")
+    # number of sentences each source word has been seen in
+    source_counts = defaultdict(int)
+    # number of sentences each target word has been seen in
+    target_counts = defaultdict(int)
+    # number of sentence pairs each (source, target) word  pair have been seen together in
+    pair_counts = defaultdict(int)
+    for (i, (source_sentence, target_sentence)) in enumerate(bitext):
+        source_tokens = set(source_sentence)
+        target_tokens = set(target_sentence)
+        for source_token in source_tokens:
+            source_counts[source_token] += 1
+        for target_token in target_tokens:
+            target_counts[target_token] += 1
+        for (source_token, target_token) in product(source_tokens, target_tokens):
+            pair_counts[(source_token, target_token)] += 1
+        if i % 500 == 0:
+            sys.stderr.write(".")
+    sys.stderr.write("\n")
+    return source_counts, target_counts, pair_counts
+
+
+def align(bitext, threshold):
+    for (source_sentence, target_sentence) in bitext:
+        alignment = []
+        for (i, source_token) in enumerate(source_sentence):
+            target_candidates = [
+                (j, dice.get((source_token, target_token), 0.0))
+                for (j, target_token) in enumerate(target_sentence)
+                if dice.get((source_token, target_token), 0.0) >= threshold
+            ]
+            if target_candidates:
+                best_candidate = max(target_candidates, key=ig(1))[0]
+                alignment.append((i, best_candidate))
+        yield alignment
+
+
+if __name__ == "__main__":
+    opt_parser = optparse.OptionParser()
+    opt_parser.add_option("-b", "--bitext", dest="bitext", default="data/dev-test-train.de-en",
+                          help="Parallel corpus (default data/dev-test-train.de-en)")
+    opt_parser.add_option("-t", "--threshold", dest="threshold", default=0.5, type="float",
+                          help="Threshold for aligning with Dice's coefficient (default=0.5)")
+    opt_parser.add_option("-n", "--num_sentences", dest="num_sents", default=sys.maxint, type="int",
+                          help="Number of sentences to use for training and alignment")
+    (opts, _) = opt_parser.parse_args()
+
+    sys.stderr.write("Training with Dice's coefficient...\n")
+    source_counts, target_counts, pair_counts = sentence_counts(read_sentence_pairs(opts.bitext, opts.num_sents))
+    dice = dice_coefficients(pair_counts, source_counts, target_counts, opts.threshold)
+    for alignment in align(read_sentence_pairs(opts.bitext, opts.num_sents), opts.threshold):
+        sys.stdout.write(u" ".join("%i-%i" % (i, j) for (i, j) in alignment) + u"\n")
