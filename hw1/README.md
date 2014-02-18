@@ -16,15 +16,33 @@ The `data/` directory contains a fragment of the German/English Europarl corpus.
  - `data/dev.align` contains 150 manual alignments corresponding to the first 150 sentences of the parallel corpus. When you run `./check` these are used to compute the alignment error rate. You may use these in any way you choose. The notation `i-j` means the word at position *i* (0-indexed) in the German sentence is aligned to the word at position *j* in the English sentence; the notation `i?j` means they are "probably" aligned.
 
 
-== Experiments ==
+Experiments
+===========
 
-=== 1 ===
+1
+---
 
 Fixed Dice coefficient calculation (intersection was being double counted).
 Instead of choosing all alignments that meet a threshold, choose best target word given source word.
 Tuned Dice cutoff threshold (best results at -t 0.1).
 
--t 0.1
-Precision = 0.532476
-Recall = 0.565891
-AER = 0.451784
+> Precision = 0.532476
+
+> Recall = 0.565891
+
+> AER = 0.451784
+
+
+2
+---
+
+Model1 estimated with EM, with poor-man's fast align.
+Prune log probabilities below -5.0.
+Subtract 2.0 * | i/m - j/n | from log probabilities before renormalizing
+to penalize off-diagonals.
+
+> Precision = 0.669845
+
+> Recall = 0.661381
+
+> AER = 0.334241

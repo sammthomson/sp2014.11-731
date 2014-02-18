@@ -16,12 +16,12 @@ def read_sentence_pairs(bitext_filename, num_sentences):
 def dice_coefficients(pair_counts, source_counts, target_counts, threshold):
     """
     Calculates the dice coefficients for all pairs of tokens
-    Dice(A, B) := | A.intersection(B) | / | A.union(B) |
+    Dice(A, B) := 2.0 * | A.intersection(B) | / (| A | + | B |
     """
     sys.stderr.write("calculating Dice similarities\n")
     dices = {}
     for (i, ((source_token, target_token), pair_count)) in enumerate(pair_counts.iteritems()):
-        dice = 1.0 * pair_count / (source_counts[source_token] + target_counts[target_token] - pair_count)
+        dice = 2.0 * pair_count / (source_counts[source_token] + target_counts[target_token])
         if dice >= threshold:
             dices[(source_token, target_token)] = dice
         if i % 5000 == 0:
