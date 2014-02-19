@@ -9,21 +9,35 @@ import RichFile.enrichFile
 import scala.collection.parallel.ParIterable
 import LogProbRing._
 
+object Settings {
+  val bitextFilename = "/Users/sam/code/sp2014.11-731/hw1/data/dev-test-train.de-en"
+  val experimentsDir = "experiments"
+}
 
 case class SentencePair(srcSentence: Seq[String], targetSentence: Seq[String])
+object SentencePair {
+  val PAIR_SEPARATOR = """ \|\|\| """
 
-case class Counts(var counts: mutable.Map[String, Float], var z: Float) {
-  import Counts._
+  def fromLine(line: String) = line.split(PAIR_SEPARATOR).map(_.trim().split(" ").toSeq) match {
+    case Array(src, target) => SentencePair(src, target)
+  }
 
-  def += (other: Counts): Counts = {
-    z = plus(z, other.z)
-    counts = merge(counts, other.counts)
-    this
+  def readSentencePairs(bitextFilename: String, numSentences: Int): Array[SentencePair] = {
+    System.err.println("reading sentences")
+    var pairs: Array[SentencePair] = null
+    for (bitextFile <- managed(Source.fromFile(bitextFilename)(Codec.UTF8))) {
+      pairs = bitextFile.getLines().take(numSentences).map(fromLine).toArray
+    }
+    System.err.println("done")
+    pairs
   }
 }
-object Counts {
-  def empty = Counts(mutable.Map(), one)
 
+case class Alignment(as: Seq[(Int, Int)]) {
+  override def toString = as.map({ case (i, j) => "%d-%d".format(i, j) }).mkString(" ")
+}
+
+object Counts {
   def merge[K](left: mutable.Map[K, Float], right: Iterable[(K, Float)]): mutable.Map[K, Float] = {
     left ++= right map {
       case (k, v) => k -> plus(left.getOrElse(k, zero), v)
@@ -56,10 +70,7 @@ case class Model1(alignmentModel: AlignmentModel, translationModel: WordTranslat
     // turn into P( target | src )
     System.err.println("\nnormalizing to get P(target | src)")
     val probs = counts.zipWithIndex.map({ case ((srcToken, targetProbs), i) => {
-      if (i % 100 == 0) {
-        System.err.print(".")
-        System.err.flush()
-      }
+      if (i % 100 == 0) System.err.print(".")
       val srcProb = sum(targetProbs.values)
       srcToken -> targetProbs.map({
         case (targetToken, prob) => targetToken -> dividedBy(prob, srcProb)
@@ -72,7 +83,6 @@ case class Model1(alignmentModel: AlignmentModel, translationModel: WordTranslat
   def getAllExpectedCounts(trainingData: Traversable[SentencePair]): mutable.Map[String, mutable.Map[String, Float]] = {
     val allCounts = trainingData.toIterator.grouped(100).map {
       System.err.print(",")
-      System.err.flush()
       _.par.map(getExpectedCounts).reduce(mergeMapAndLL)
     }
     val (results, totalLogLikelihood) = allCounts.reduceLeft(mergeMapAndLL)
@@ -99,47 +109,30 @@ case class Model1(alignmentModel: AlignmentModel, translationModel: WordTranslat
     countsAndLogLiks.foldLeft((mutable.Map[String, mutable.Map[String, Float]](), one))(mergeMapAndLL)
   }
 
-  def decode(pair: SentencePair, offDiagPenalty: Float = 2f): Seq[(Int, Int)] = {
+  def decode(pair: SentencePair, offDiagPenalty: Float = 2f): Alignment = {
     val m = pair.srcSentence.length
     val n = pair.targetSentence.length
-    for ((targetToken, j) <- pair.targetSentence.zipWithIndex;
+    val as = for ((targetToken, j) <- pair.targetSentence.zipWithIndex;
          bestAlignment = pair.srcSentence.zipWithIndex.map { case (src, i) =>
-           times(translationModel.score(src, targetToken), alignmentModel.score(i, j, m, n))
-         }.zipWithIndex.maxBy(_._1)
+           (times(translationModel.score(src, targetToken), alignmentModel.score(i, j, m, n)), i)
+         }.maxBy(_._1)
          if bestAlignment._1 > translationModel.score(NULL, targetToken)) yield {
       (bestAlignment._2, j)
     }
+    Alignment(as)
   }
 
   def decodeAll(sentences: TraversableOnce[SentencePair], offDiagPenalty: Float = 2f): Iterator[String] = {
     sentences.toIterator.grouped(100).flatMap( group => {
       System.err.print(".")
-      System.err.flush()
-      group.par.map(decode(_, offDiagPenalty)).map(_.map({ case (i, j) => "%d-%d".format(i, j) }).mkString(" ")).seq
+      group.par.map(decode(_, offDiagPenalty)).map(_.toString).seq
     })
   }
 
   def save(file: File) = translationModel.save(file)
 }
-
 object Model1 {
-  val PAIR_SEPARATOR = """ \|\|\| """
-
   val flat = Model1(UniformAlignmentModel, PhraseTable(Map(), one))
-
-  def readSentencePairs(bitextFilename: String, numSentences: Int): Array[SentencePair] = {
-    System.err.println("reading sentences")
-    var pairs: Array[SentencePair] = null
-    for(bitextFile <- managed(Source.fromFile(bitextFilename)(Codec.UTF8))) {
-      pairs = (bitextFile.getLines().take(numSentences).map {
-        line => line.split(PAIR_SEPARATOR).map(_.trim().split(" ").toSeq)
-      } map {
-        case Array(src, target) => SentencePair(src, target)
-      }).toArray
-    }
-    System.err.println("done")
-    pairs
-  }
 }
 
 object LogProbRing {
@@ -163,11 +156,6 @@ object LogProbRing {
   def product(xs: Traversable[Float]): Float = xs.par.sum
 }
 
-object Settings {
-  val bitextFilename = "/Users/sam/code/sp2014.11-731/hw1/data/dev-test-train.de-en"
-  val experimentsDir = "experiments"
-}
-
 object RunEM extends App {
   import Settings._
 
@@ -176,7 +164,7 @@ object RunEM extends App {
   val offDiagPenalty = args(2).toFloat
   var model = Model1(DiagonalAlignmentModel(offDiagPenalty), PhraseTable(Map(), one))
   val numIterations = 10
-  val sentences = Model1.readSentencePairs(bitextFilename, numSentences)
+  val sentences = SentencePair.readSentencePairs(bitextFilename, numSentences)
   outputFolder.mkdir()
   val outputPredictionsFile = new File(outputFolder, "predictions.txt")
   (1 to numIterations) foreach { i =>
@@ -186,7 +174,7 @@ object RunEM extends App {
     model.save(modelFile)
     System.err.println("done.")
   }
-  private val predictions = model.decodeAll(sentences.iterator, offDiagPenalty)
+  private val predictions = model.decodeAll(sentences, offDiagPenalty)
   outputPredictionsFile.writeLines(predictions)
 }
 
@@ -199,7 +187,7 @@ object Predict extends App {
   val modelFile = new File(args(2))
   val offDiagPenalty = args(3).toFloat
   var model = Model1(DiagonalAlignmentModel(offDiagPenalty), PhraseTable.load(modelFile))
-  val sentences = Model1.readSentencePairs(bitextFilename, numSentences)
-  private val predictions = model.decodeAll(sentences.iterator, offDiagPenalty)
+  val sentences = SentencePair.readSentencePairs(bitextFilename, numSentences)
+  private val predictions = model.decodeAll(sentences, offDiagPenalty)
   outputPredictionsFile.writeLines(predictions)
 }
