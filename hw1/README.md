@@ -22,7 +22,6 @@ Experiments
 1
 ---
 
-Fixed Dice coefficient calculation (intersection was being double counted).
 Instead of choosing all alignments that meet a threshold, choose best target word given source word.
 Tuned Dice cutoff threshold (best results at -t 0.1).
 
@@ -46,3 +45,14 @@ to penalize off-diagonals.
 > Recall = 0.661381
 
 > AER = 0.334241
+
+
+3
+---
+
+Tune the penalty for being off diagonal (only tuned during test time, value used for training was 2.0)
+Best performance was gotten at 10.0
+
+Precision = 0.707074
+Recall = 0.648344
+AER = 0.322421
