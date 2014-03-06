@@ -28,3 +28,10 @@ Add:
 * character ngrams for n = 3, 4, 5
 
 Tau: 0.15280996921
+
+3
+---
+
+Take out everything but token_recall
+
+Tau: 0.16579950585

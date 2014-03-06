@@ -29,25 +29,25 @@ def extract_features(hyp, ref):
     p, r, f = precision_recall(hypothesis_words, reference_words)
     prefix_p, prefix_r, prefix_f = precision_recall(hyp_prefixes, ref_prefixes)
     results = {
-        'token_precision': p,
+        # 'token_precision': p,
         'token_recall':  r,
-        'token_f1': f,
-        'prefix_precision': prefix_p,
-        'prefix_recall': prefix_r,
-        'prefix_f1': prefix_f,
+        # 'token_f1': f,
+        # 'prefix_precision': prefix_p,
+        # 'prefix_recall': prefix_r,
+        # 'prefix_f1': prefix_f,
         # 'morph_meteor': harmonic_mean(p, r, prefix_p, prefix_r),
-        'len_diff': len(hypothesis_words) - len(reference_words),
-        'abs_len_diff': abs(len(hypothesis_words) - len(reference_words)),
-        'len_factor': len(hypothesis_words) / float(len(reference_words)),
+        # 'len_diff': len(hypothesis_words) - len(reference_words),
+        # 'abs_len_diff': abs(len(hypothesis_words) - len(reference_words)),
+        # 'len_factor': len(hypothesis_words) / float(len(reference_words)),
     }
     for n in range(3, 6):
         hyp_char_ngrams = [ngram for word in hypothesis_words for ngram in ngrams(word, n)]
         ref_char_ngrams = [ngram for word in reference_words for ngram in ngrams(word, n)]
         char_ngram_p, char_ngram_r, char_ngram_f = precision_recall(hyp_char_ngrams, ref_char_ngrams)
         results.update({
-            'char_%sgram_precision' % n: char_ngram_p,
-            'char_%sgram_recall' % n: char_ngram_r,
-            'char_%sgram_f1' % n: char_ngram_f,
+            # 'char_%sgram_precision' % n: char_ngram_p,
+            # 'char_%sgram_recall' % n: char_ngram_r,
+            # 'char_%sgram_f1' % n: char_ngram_f,
         })
     return results
 
