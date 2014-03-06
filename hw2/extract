@@ -1,27 +1,53 @@
 #!/usr/bin/env python
-
 import argparse
 import json
-import os, sys, math
+import sys
+
+PREFIX_LEN = 6
+
+
+def harmonic_mean(*xs):
+    xs = list(xs)
+    return len(xs) / sum(1.0 / x for x in xs) if min(xs) > 0 else 0.0
+
+
+def precision_recall(a, b):
+    precision = sum(1 for word in a if word in b) / float(len(a))
+    recall = sum(1 for word in b if word in a) / float(len(b))
+    return precision, recall, harmonic_mean(precision, recall)
+
 
 def extract_features(hyp, ref):
-  hwords = hyp.lower().split()
-  rwords = ref.lower().split()
-  refset = set(rwords)
-  precision = sum(1.0 for word in hwords if word in refset) / len(hwords)
-  return {'prec':precision}
+    hypothesis_words = hyp.lower().split()
+    reference_words = ref.lower().split()
+    hyp_prefixes = [word[:PREFIX_LEN] for word in hypothesis_words]
+    ref_prefixes = [word[:PREFIX_LEN] for word in reference_words]
+    p, r, f = precision_recall(hypothesis_words, reference_words)
+    prefix_p, prefix_r, prefix_f = precision_recall(hyp_prefixes, ref_prefixes)
+    return {
+        'token_precision': p,
+        'token_recall':  r,
+        'token_f1': f,
+        'prefix_precision': prefix_p,
+        'prefix_recall': prefix_r,
+        'prefix_f1': prefix_f,
+        # 'morph_meteor': harmonic_mean(p, r, prefix_p, prefix_r),
+        'len_diff': len(hypothesis_words) - len(reference_words),
+        'abs_len_diff': abs(len(hypothesis_words) - len(reference_words)),
+        'len_factor': len(hypothesis_words) / float(len(reference_words)),
+    }
 
-argparser = argparse.ArgumentParser(prog='extract')
-argparser.add_argument('-x', '--pairs', dest='pairs', default='data/en-cs.pairs', help='Reference-Hypothesis pairs')
 
-args = argparser.parse_args()
+if __name__ == "__main__":
+    arg_parser = argparse.ArgumentParser(prog='extract')
+    arg_parser.add_argument(
+        '-x', '--pairs', dest='pairs', default='data/en-cs.pairs', help='Reference-Hypothesis pairs')
+    args = arg_parser.parse_args()
 
-lc = 0
-sys.stderr.write('Extracting features for (ref,hyp) pairs from %s.\n' % args.pairs)
-# loop over all (ref,hyp) pairs in the input file and extract evaluation features
-for ref_hyp in open(args.pairs):
-  lc += 1
-  ref, hyp = ref_hyp.rstrip().split(' ||| ')
-  fmap = extract_features(hyp, ref)
-  print json.dumps(fmap)   # print evaluation feature map
-
+    sys.stderr.write('Extracting features for (ref,hyp) pairs from %s.\n' % args.pairs)
+    # loop over all (ref,hyp) pairs in the input file and extract evaluation features
+    with open(args.pairs) as pairs_file:
+        for line in pairs_file:
+            ref, hyp = line.rstrip().split(' ||| ')
+            feature_map = extract_features(hyp, ref)
+            print json.dumps(feature_map)   # print evaluation feature map
