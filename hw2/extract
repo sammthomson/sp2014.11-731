@@ -17,6 +17,10 @@ def precision_recall(a, b):
     return precision, recall, harmonic_mean(precision, recall)
 
 
+def ngrams(l, n=3):
+    return [zip(*[l[i:] for i in range(n)])]
+
+
 def extract_features(hyp, ref):
     hypothesis_words = hyp.lower().split()
     reference_words = ref.lower().split()
@@ -24,7 +28,7 @@ def extract_features(hyp, ref):
     ref_prefixes = [word[:PREFIX_LEN] for word in reference_words]
     p, r, f = precision_recall(hypothesis_words, reference_words)
     prefix_p, prefix_r, prefix_f = precision_recall(hyp_prefixes, ref_prefixes)
-    return {
+    results = {
         'token_precision': p,
         'token_recall':  r,
         'token_f1': f,
@@ -36,6 +40,16 @@ def extract_features(hyp, ref):
         'abs_len_diff': abs(len(hypothesis_words) - len(reference_words)),
         'len_factor': len(hypothesis_words) / float(len(reference_words)),
     }
+    for n in range(3, 6):
+        hyp_char_ngrams = [ngram for word in hypothesis_words for ngram in ngrams(word, n)]
+        ref_char_ngrams = [ngram for word in reference_words for ngram in ngrams(word, n)]
+        char_ngram_p, char_ngram_r, char_ngram_f = precision_recall(hyp_char_ngrams, ref_char_ngrams)
+        results.update({
+            'char_%sgram_precision' % n: char_ngram_p,
+            'char_%sgram_recall' % n: char_ngram_r,
+            'char_%sgram_f1' % n: char_ngram_f,
+        })
+    return results
 
 
 if __name__ == "__main__":

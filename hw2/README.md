@@ -20,4 +20,11 @@ Tau: 0.144163136735
 
 (no simple morphological meteor, that hurt performance)
 
+2
+---
 
+Add:
+
+* character ngrams for n = 3, 4, 5
+
+Tau: 0.15280996921
