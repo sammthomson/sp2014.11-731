@@ -1,10 +1,16 @@
 #!/usr/bin/env python
 import argparse
 import json
+import string
 import sys
 from stemmer.czech_stemmer import cz_stem
+from kenlm import LanguageModel
+from unidecode import unidecode
 
 PREFIX_LEN = 6
+# LM = LanguageModel('data/ptb/czech_pdt_train.aggressive.stemmed.binary')
+AGGRO_LM = LanguageModel('data/europarl/europarl-v7.cs.aggressive.stemmed.binary')
+LM = LanguageModel('data/europarl/europarl-v7.cs.binary')
 
 
 def harmonic_mean(*xs):
@@ -27,17 +33,21 @@ def stem_all(words):
 
 
 def extract_features(hyp, ref):
-    hypothesis_words = hyp.lower().split()
-    reference_words = ref.lower().split()
-    # num_hyp = len(hypothesis_words)
-    # num_ref = len(reference_words)
+    # hypothesis_words = unidecode(hyp.lower().strip(string.punctuation)).split()
+    # reference_words = unidecode(ref.lower().strip(string.punctuation)).split()
+    hypothesis_words = unidecode(hyp.lower()).split()
+    reference_words = unidecode(ref.lower()).split()
+    num_hyp = len(hypothesis_words)
+    num_ref = len(reference_words)
     p, r, f = prf(hypothesis_words, reference_words)
-    # hyp_prefixes = [word[:PREFIX_LEN] for word in hypothesis_words]
-    # ref_prefixes = [word[:PREFIX_LEN] for word in reference_words]
-    # prefix_p, prefix_r, prefix_f = prf(hyp_prefixes, ref_prefixes)
-    # hyp_stems = [cz_stem(word, aggressive=True) for word in hypothesis_words]
-    # ref_stems = [cz_stem(word, aggressive=True) for word in reference_words]
-    # stem_p, stem_r, stem_f = prf(hyp_stems, ref_stems)
+    hyp_prefixes = [word[:PREFIX_LEN] for word in hypothesis_words]
+    ref_prefixes = [word[:PREFIX_LEN] for word in reference_words]
+    prefix_p, prefix_r, prefix_f = prf(hyp_prefixes, ref_prefixes)
+    hyp_stems = [cz_stem(word, aggressive=True) for word in hypothesis_words]
+    ref_stems = [cz_stem(word, aggressive=True) for word in reference_words]
+    stem_p, stem_r, stem_f = prf(hyp_stems, ref_stems)
+    aggro_lm_score = AGGRO_LM.score(' '.join(hyp_stems))
+    lm_score = LM.score(' '.join(hypothesis_words))
     results = {
         # 'token_precision': p,
         'token_recall':  r,
@@ -51,11 +61,15 @@ def extract_features(hyp, ref):
         # 'morph_meteor': harmonic_mean(p, r, prefix_p, prefix_r),
         # 'stem_meteor': harmonic_mean(p, r, stem_p, stem_r),
         # 'len_diff': len(hypothesis_words) - len(reference_words),
-        # 'hyp_len': len(hypothesis_words),
-        # 'abs_len_diff': abs(len(hypothesis_words) - len(reference_words)),
+        # 'len': .1 * num_hyp,
+        # 'abs_len_diff': .2 * (abs(len(hypothesis_words) - len(reference_words))),
         # 'len_factor': min(num_hyp, num_ref) / float(max(num_hyp, num_ref)),
-        # 'len_factor^2': .0000001 * len(hypothesis_words)**2 / (len(reference_words)**2),
-
+        # 'len_factor': num_hyp / float(num_ref),
+        # 'len_factor^2':  0.5 * num_hyp**2 / float(num_ref**2),
+        # 'aggro_lm_score': .02 * aggro_lm_score,
+        # 'lm_score': .02 * lm_score,
+        # 'len_normalized_aggro_lm_score': aggro_lm_score / num_hyp,
+        # 'len_normalized_lm_score': lm_score / num_hyp,
     }
     for n in range(3, 6):
         hyp_char_ngrams = [ngram for word in hypothesis_words for ngram in ngrams(word, n)]
@@ -66,6 +80,25 @@ def extract_features(hyp, ref):
             # 'char_%sgram_recall' % n: char_ngram_r,
             # 'char_%sgram_f1' % n: char_ngram_f,
         })
+    all_hyp_ngrams = list(hyp_stems)
+    all_ref_ngrams = list(ref_stems)
+    for n in range(2, 5):
+        hyp_ngrams = ngrams(hyp_stems, n)
+        ref_ngrams = ngrams(ref_stems, n)
+        all_hyp_ngrams += hyp_ngrams
+        all_ref_ngrams += ref_ngrams
+        ngram_p, ngram_r, ngram_f = prf(hyp_ngrams, ref_ngrams)
+        results.update({
+            # '%sgram_precision' % n: ngram_p,
+            # '%sgram_recall' % n: ngram_r,
+            # '%sgram_f1' % n: ngram_f,
+        })
+    ngram_p, ngram_r, ngram_f = prf(all_hyp_ngrams, all_ref_ngrams)
+    results.update({
+        # 'ngram_precision': ngram_p,
+        # 'stem_ngram_recall': ngram_r,
+        # 'ngram_f1': ngram_f
+    })
     return results
 
 
@@ -78,7 +111,9 @@ if __name__ == "__main__":
     sys.stderr.write('Extracting features for (ref,hyp) pairs from %s.\n' % args.pairs)
     # loop over all (ref,hyp) pairs in the input file and extract evaluation features
     with open(args.pairs) as pairs_file:
-        for line in pairs_file:
+        for i, line in enumerate(pairs_file):
             ref, hyp = line.rstrip().split(' ||| ')
             feature_map = extract_features(hyp, ref)
+            if i % 1000 == 0:
+                sys.stderr.write(".")
             print json.dumps(feature_map)   # print evaluation feature map
