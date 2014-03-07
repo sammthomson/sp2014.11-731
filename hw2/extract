@@ -2,6 +2,7 @@
 import argparse
 import json
 import sys
+from stemmer.czech_stemmer import cz_stem
 
 PREFIX_LEN = 6
 
@@ -11,9 +12,9 @@ def harmonic_mean(*xs):
     return len(xs) / sum(1.0 / x for x in xs) if min(xs) > 0 else 0.0
 
 
-def precision_recall(a, b):
-    precision = sum(1 for word in a if word in b) / float(len(a))
-    recall = sum(1 for word in b if word in a) / float(len(b))
+def prf(a, b, smoothing=0.0):
+    precision = smoothing + (1-smoothing) * sum(1 for word in a if word in b) / float(len(a))
+    recall = smoothing + (1-smoothing) * sum(1 for word in b if word in a) / float(len(b))
     return precision, recall, harmonic_mean(precision, recall)
 
 
@@ -21,29 +22,45 @@ def ngrams(l, n=3):
     return [zip(*[l[i:] for i in range(n)])]
 
 
+def stem_all(words):
+    return [cz_stem(word) for word in words]
+
+
 def extract_features(hyp, ref):
     hypothesis_words = hyp.lower().split()
     reference_words = ref.lower().split()
-    hyp_prefixes = [word[:PREFIX_LEN] for word in hypothesis_words]
-    ref_prefixes = [word[:PREFIX_LEN] for word in reference_words]
-    p, r, f = precision_recall(hypothesis_words, reference_words)
-    prefix_p, prefix_r, prefix_f = precision_recall(hyp_prefixes, ref_prefixes)
+    # num_hyp = len(hypothesis_words)
+    # num_ref = len(reference_words)
+    p, r, f = prf(hypothesis_words, reference_words)
+    # hyp_prefixes = [word[:PREFIX_LEN] for word in hypothesis_words]
+    # ref_prefixes = [word[:PREFIX_LEN] for word in reference_words]
+    # prefix_p, prefix_r, prefix_f = prf(hyp_prefixes, ref_prefixes)
+    # hyp_stems = [cz_stem(word, aggressive=True) for word in hypothesis_words]
+    # ref_stems = [cz_stem(word, aggressive=True) for word in reference_words]
+    # stem_p, stem_r, stem_f = prf(hyp_stems, ref_stems)
     results = {
         # 'token_precision': p,
         'token_recall':  r,
         # 'token_f1': f,
+        # "stem_recall": stem_r,
+        # "stem_precision": stem_p,
+        # "stem_f1": stem_f,
         # 'prefix_precision': prefix_p,
         # 'prefix_recall': prefix_r,
         # 'prefix_f1': prefix_f,
         # 'morph_meteor': harmonic_mean(p, r, prefix_p, prefix_r),
+        # 'stem_meteor': harmonic_mean(p, r, stem_p, stem_r),
         # 'len_diff': len(hypothesis_words) - len(reference_words),
+        # 'hyp_len': len(hypothesis_words),
         # 'abs_len_diff': abs(len(hypothesis_words) - len(reference_words)),
-        # 'len_factor': len(hypothesis_words) / float(len(reference_words)),
+        # 'len_factor': min(num_hyp, num_ref) / float(max(num_hyp, num_ref)),
+        # 'len_factor^2': .0000001 * len(hypothesis_words)**2 / (len(reference_words)**2),
+
     }
     for n in range(3, 6):
         hyp_char_ngrams = [ngram for word in hypothesis_words for ngram in ngrams(word, n)]
         ref_char_ngrams = [ngram for word in reference_words for ngram in ngrams(word, n)]
-        char_ngram_p, char_ngram_r, char_ngram_f = precision_recall(hyp_char_ngrams, ref_char_ngrams)
+        char_ngram_p, char_ngram_r, char_ngram_f = prf(hyp_char_ngrams, ref_char_ngrams)
         results.update({
             # 'char_%sgram_precision' % n: char_ngram_p,
             # 'char_%sgram_recall' % n: char_ngram_r,

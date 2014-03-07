@@ -35,6 +35,7 @@ def neg(a):
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser(prog='fit')
     argparser.add_argument('-2', '--l2', dest='l2', default=0.0, help='L2 regularization strength')
+    argparser.add_argument('-1', '--l1', dest='l1', default=0.0, help='L1 regularization strength')
     argparser.add_argument('-x', '--pairs', dest='pairs', default='data/en-cs.pairs', help='Reference-Hypothesis pairs')
     argparser.add_argument('-y', '--labels', dest='labels', default='data/en-cs.train.labels',
                            help='Reference-H1-H2-Judgement labels')
@@ -75,7 +76,15 @@ if __name__ == "__main__":
     r.close()
     sys.stderr.write('Processed %d training instances (missing features for %d of them).\n' % (lc, num_feats))
 
-    cmd = [creg, '-x', features_file, '-y', resp_file, '-o', '--l2', str(args.l2)]
+    cmd = [
+        creg,
+        '-x', features_file,
+        '-y', resp_file,
+        '-o',
+        '--l2', str(args.l2),
+        '--l1', str(args.l1),
+        # '-w', 'weights.json'
+    ]
     sys.stderr.write('Fitting model parameters:\n%s\n' % str(cmd))
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE)
     out, err = process.communicate()

@@ -35,3 +35,12 @@ Tau: 0.15280996921
 Take out everything but token_recall
 
 Tau: 0.16579950585
+
+4
+___
+
+Try lots of things unsuccessfully
+
+* smoothed f1
+* stemming, looking at p, r, f1, stemmed_meteor
+* adding in quadratic feature for length factor (so model could learn optimal factor, and to penalize deviations from it)
