@@ -6,8 +6,8 @@ A translation model is a dictionary where keys are tuples of French words
 and values are lists of (english, logprob) named tuples. For instance,
 the French phrase "que se est" has two translations, represented like so:
 tm[('que', 'se', 'est')] = [
-    phrase(english='what has', logprob=-0.301030009985),
-    phrase(english='what has been', logprob=-0.301030009985)]
+    Phrase(english='what has', logprob=-0.301030009985),
+    Phrase(english='what has been', logprob=-0.301030009985)]
 k is a pruning parameter: only the top k translations are kept for each f.
 
 # A language model scores sequences of English words, and must account
@@ -28,12 +28,12 @@ UNKNOWN_SYMBOL = "<unk>"
 END_SYMBOL = "</s>"
 START_SYMBOL = "<s>"
 
-Phrase = namedtuple("phrase", "english, logprob")
+Phrase = namedtuple("Phrase", "english, logprob")
 
-NgramStats = namedtuple("ngram_stats", "logprob, backoff")
+NgramStats = namedtuple("NgramStats", "logprob, backoff")
 
 
-def TM(filename, k):
+def load_translation_model(filename, k):
     sys.stderr.write("Reading translation model from %s...\n" % (filename,))
     tm = {}
     for line in open(filename).readlines():
@@ -45,16 +45,25 @@ def TM(filename, k):
     return tm
 
 
-class LM:
-    def __init__(self, filename):
+class LanguageModel:
+    def __init__(self, table):
+        self.table = table
+
+    @staticmethod
+    def load(filename):
         sys.stderr.write("Reading language model from %s...\n" % (filename,))
-        self.table = {}
-        for line in open(filename):
-            entry = line.strip().split("\t")
-            if len(entry) > 1 and entry[0] != "ngram":
-                (logprob, ngram, backoff) = (
-                    float(entry[0]), tuple(entry[1].split()), float(entry[2] if len(entry) == 3 else 0.0))
-                self.table[ngram] = NgramStats(logprob, backoff)
+        table = {}
+        with open(filename) as in_file:
+            for line in in_file:
+                entry = line.strip().split("\t")
+                if len(entry) > 1 and entry[0] != "ngram":
+                    (log_prob, ngram, backoff) = (
+                        float(entry[0]),
+                        tuple(entry[1].split()),
+                        float(entry[2] if len(entry) == 3 else 0.0)
+                    )
+                    table[ngram] = NgramStats(log_prob, backoff)
+        return LanguageModel(table)
 
     def begin(self):
         return START_SYMBOL,

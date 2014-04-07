@@ -2,18 +2,18 @@
 import argparse
 from itertools import islice
 import sys
-import models
+from models import load_translation_model, LanguageModel
 import heapq
 from collections import namedtuple
 
 
-Hypothesis = namedtuple('hypothesis', 'logprob, lm_state, predecessor, phrase')
+Hypothesis = namedtuple('Hypothesis', 'logprob, lm_state, predecessor, phrase')
 
 
-def extract_english_recursive(h):
+def extract_english(h):
     """ Follows all back-pointers to recover the full translation """
     return '' if h.predecessor is None else '%s%s ' % (
-        extract_english_recursive(h.predecessor), h.phrase.english)
+        extract_english(h.predecessor), h.phrase.english)
 
 
 def extract_tm_log_prob(h):
@@ -21,44 +21,51 @@ def extract_tm_log_prob(h):
     return 0.0 if h.predecessor is None else h.phrase.logprob + extract_tm_log_prob(h.predecessor)
 
 
-def decode_sentence(foreign_sentence, translation_model, language_model, stack_size=1, verbose=False):
-    """
-    The following code implements a DP monotone decoding
-    algorithm (one that doesn't permute the target phrases).
-    Hence all hypotheses in stacks[i] represent translations of
-    the first i words of the input sentence.
-    HINT: Generalize this so that stacks[i] contains translations
-    of any i words (remember to keep track of which words those
-    are, and to estimate future costs)
-    """
-    stacks = [{} for _ in range(len(foreign_sentence) + 1)]
-    stacks[0][language_model.begin()] = Hypothesis(0.0, language_model.begin(), None, None)
-    for start, stack in enumerate(stacks[:-1]):
-        # extend the top `stack_size` hypotheses in the current stack
-        for hypothesis in heapq.nlargest(stack_size, stack.itervalues(), key=lambda h: h.logprob):  # prune
-            for end in xrange(start + 1, len(foreign_sentence) + 1):
-                foreign_phrase = foreign_sentence[start:end]
-                if foreign_phrase in translation_model:
-                    for english_phrase in translation_model[foreign_phrase]:
-                        log_prob = hypothesis.logprob + english_phrase.logprob
-                        lm_state = hypothesis.lm_state
-                        for word in english_phrase.english.split():
-                            lm_state, word_log_prob = language_model.score(lm_state, word)
-                            log_prob += word_log_prob
-                        log_prob += language_model.end(lm_state) if end == len(foreign_sentence) else 0.0
-                        new_hypothesis = Hypothesis(log_prob, lm_state, hypothesis, english_phrase)
-                        # second case is recombination
-                        if lm_state not in stacks[end] or stacks[end][lm_state].logprob < log_prob:
-                            stacks[end][lm_state] = new_hypothesis
+def get_log_prob(h):
+    return h.logprob
 
-    # find best translation by looking at the best scoring hypothesis
-    # on the last stack
-    winner = max(stacks[-1].itervalues(), key=lambda h: h.logprob)
-    if verbose:
-        tm_log_prob = extract_tm_log_prob(winner)
-        sys.stderr.write('LM = %f, TM = %f, Total = %f\n' %
-                         (winner.logprob - tm_log_prob, tm_log_prob, winner.logprob))
-    return extract_english_recursive(winner)
+
+class MonotoneDecoder(object):
+    """ monotone decoding (doesn't permute the target phrases) """
+    def __init__(self, translation_model, language_model, max_stack_size=1, verbose=False):
+        self.translation_model = translation_model
+        self.language_model = language_model
+        self.max_stack_size = max_stack_size
+        self.verbose = verbose
+
+    def decode(self, foreign_sentence):
+        """ Translates the given sentence into English """
+        # Since decoding is monotone, all hypotheses in stacks[i] represent translations of
+        # the first i words of the input sentence.
+        stacks = [{} for _ in range(len(foreign_sentence) + 1)]
+        stacks[0][language_model.begin()] = Hypothesis(0.0, language_model.begin(), None, None)
+        for start, stack in enumerate(stacks[:-1]):
+            # extend the top `stack_size` hypotheses in the current stack
+            beam = heapq.nlargest(self.max_stack_size, stack.itervalues(), key=get_log_prob)
+            for hypothesis in beam:
+                for end in xrange(start + 1, len(foreign_sentence) + 1):
+                    foreign_phrase = foreign_sentence[start:end]
+                    if foreign_phrase in translation_model:
+                        for english_phrase in translation_model[foreign_phrase]:
+                            log_prob = hypothesis.logprob + english_phrase.logprob
+                            lm_state = hypothesis.lm_state
+                            for word in english_phrase.english.split():
+                                lm_state, word_log_prob = language_model.score(lm_state, word)
+                                log_prob += word_log_prob
+                            log_prob += language_model.end(lm_state) if end == len(foreign_sentence) else 0.0
+                            new_hypothesis = Hypothesis(log_prob, lm_state, hypothesis, english_phrase)
+                            # second case is recombination
+                            if lm_state not in stacks[end] or stacks[end][lm_state].logprob < log_prob:
+                                stacks[end][lm_state] = new_hypothesis
+
+        # find best translation by looking at the best scoring hypothesis
+        # on the last stack
+        winner = max(stacks[-1].itervalues(), key=get_log_prob)
+        if self.verbose:
+            tm_log_prob = extract_tm_log_prob(winner)
+            sys.stderr.write('LM = %f, TM = %f, Total = %f\n' %
+                             (winner.logprob - tm_log_prob, tm_log_prob, winner.logprob))
+        return extract_english(winner)
 
 
 if __name__ == '__main__':
@@ -67,7 +74,8 @@ if __name__ == '__main__':
                         help='File containing sentences to translate (default=data/input)')
     parser.add_argument('-t', '--translation-model', dest='tm', default='data/tm',
                         help='File containing translation model (default=data/tm)')
-    parser.add_argument('-s', '--stack-size', dest='s', default=1, type=int, help='Maximum stack size (default=1)')
+    parser.add_argument('-s', '--stack-size', dest='s', default=1, type=int,
+                        help='Maximum stack size (default=1)')
     parser.add_argument('-n', '--num_sentences', dest='num_sents', default=sys.maxint, type=int,
                         help='Number of sentences to decode (default=no limit)')
     parser.add_argument('-l', '--language-model', dest='lm', default='data/lm',
@@ -76,10 +84,15 @@ if __name__ == '__main__':
                         help='Verbose mode (default=off)')
     opts = parser.parse_args()
 
-    translation_model = models.TM(opts.tm, sys.maxint)
-    language_model = models.LM(opts.lm)
+    translation_model = load_translation_model(opts.tm, sys.maxint)
+    language_model = LanguageModel.load(opts.lm)
     sys.stderr.write('Decoding %s...\n' % (opts.input,))
+    decoder = MonotoneDecoder(translation_model,
+                              language_model,
+                              opts.s,
+                              opts.verbose)
     with open(opts.input) as input_file:
         for line in islice(input_file, opts.num_sents):
             foreign_sentence = tuple(line.strip().split())
-            print(decode_sentence(foreign_sentence, translation_model, language_model, opts.s, opts.verbose))
+            translation = decoder.decode(foreign_sentence)
+            print(translation)

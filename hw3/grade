@@ -2,7 +2,7 @@
 import argparse
 import sys
 import math
-import models
+from models import load_translation_model, LanguageModel
 
 
 # Three little utility functions:
@@ -36,8 +36,8 @@ if __name__ == "__main__":
                         help='File containing ARPA-format language model (default=data/lm)')
     opts = parser.parse_args()
 
-    tm = models.TM(opts.tm, sys.maxint)
-    lm = models.LM(opts.lm)
+    tm = load_translation_model(opts.tm, sys.maxint)
+    lm = LanguageModel.load(opts.lm)
     french_sents = [tuple(line.strip().split()) for line in open(opts.input).readlines()]
     english_sents = [tuple(line.strip().split()) for line in sys.stdin]
     if len(french_sents) != len(english_sents):
