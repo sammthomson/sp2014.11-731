@@ -16,3 +16,13 @@ The `data/` directory contains the input set to be decoded and the models
 
  - `data/tm` is the phrase translation model
 
+
+Experiments
+===========
+
+1
+---
+
+Increase beam size to 5
+
+logprob: -5577.706183
