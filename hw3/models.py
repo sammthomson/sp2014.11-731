@@ -3,11 +3,11 @@
 Simple translation model and language model data structures
 
 A translation model is a dictionary where keys are tuples of French words
-and values are lists of (english, logprob) named tuples. For instance,
+and values are lists of (english, log_prob) named tuples. For instance,
 the French phrase "que se est" has two translations, represented like so:
 tm[('que', 'se', 'est')] = [
-    Phrase(english='what has', logprob=-0.301030009985),
-    Phrase(english='what has been', logprob=-0.301030009985)]
+    Phrase(english='what has', log_prob=-0.301030009985),
+    Phrase(english='what has been', log_prob=-0.301030009985)]
 k is a pruning parameter: only the top k translations are kept for each f.
 
 # A language model scores sequences of English words, and must account
@@ -15,12 +15,13 @@ k is a pruning parameter: only the top k translations are kept for each f.
 lm = models.LM(filename)
 sentence = "This is a test ."
 lm_state = lm.begin() # initial state is always <s>
-logprob = 0.0
+log_prob = 0.0
 for word in sentence.split():
-    (lm_state, word_logprob) = lm.score(lm_state, word)
-    logprob += word_logprob
-logprob += lm.end(lm_state) # transition to </s>, can also use lm.score(lm_state, "</s>")[1]
+    (lm_state, word_log_prob) = lm.score(lm_state, word)
+    log_prob += word_log_prob
+log_prob += lm.end(lm_state) # transition to </s>, can also use lm.score(lm_state, "</s>")[1]
 """
+from UserDict import IterableUserDict
 import sys
 from collections import namedtuple
 
@@ -28,21 +29,27 @@ UNKNOWN_SYMBOL = "<unk>"
 END_SYMBOL = "</s>"
 START_SYMBOL = "<s>"
 
-Phrase = namedtuple("Phrase", "english, logprob")
+Phrase = namedtuple("Phrase", "english, log_prob")
 
-NgramStats = namedtuple("NgramStats", "logprob, backoff")
+NgramStats = namedtuple("NgramStats", "log_prob, backoff")
 
 
-def load_translation_model(filename, k):
-    sys.stderr.write("Reading translation model from %s...\n" % (filename,))
-    tm = {}
-    for line in open(filename).readlines():
-        (f, e, logprob) = line.strip().split(" ||| ")
-        tm.setdefault(tuple(f.split()), []).append(Phrase(e, float(logprob)))
-    for f in tm:  # prune all but top k translations
-        tm[f].sort(key=lambda x: -x.logprob)
-        del tm[f][k:]
-    return tm
+class PhraseTable(IterableUserDict):
+    def __init__(self, table):
+        IterableUserDict.__init__(self, table)
+        self.max_foreign_len = max(len(phrase) for phrase in self.iterkeys())
+
+    @staticmethod
+    def load(filename, k):
+        sys.stderr.write("Reading translation model from %s...\n" % (filename,))
+        table = {}
+        for line in open(filename).readlines():
+            (f, e, log_prob) = line.strip().split(" ||| ")
+            table.setdefault(tuple(f.split()), []).append(Phrase(e, float(log_prob)))
+        for f in table:  # prune all but top k translations
+            table[f].sort(key=lambda x: -x.log_prob)
+            del table[f][k:]
+        return PhraseTable(table)
 
 
 class LanguageModel:
@@ -73,11 +80,11 @@ class LanguageModel:
         score = 0.0
         while len(ngram) > 0:
             if ngram in self.table:
-                return ngram[-2:], score + self.table[ngram].logprob
+                return ngram[-2:], score + self.table[ngram].log_prob
             else:  # backoff
                 score += self.table[ngram[:-1]].backoff if len(ngram) > 1 else 0.0
                 ngram = ngram[1:]
-        return (), score + self.table[(UNKNOWN_SYMBOL,)].logprob
+        return (), score + self.table[(UNKNOWN_SYMBOL,)].log_prob
 
     def end(self, state):
         return self.score(state, END_SYMBOL)[1]

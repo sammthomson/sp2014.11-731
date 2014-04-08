@@ -2,7 +2,7 @@
 import argparse
 import sys
 import math
-from models import load_translation_model, LanguageModel
+from models import PhraseTable, LanguageModel
 
 
 # Three little utility functions:
@@ -36,7 +36,7 @@ if __name__ == "__main__":
                         help='File containing ARPA-format language model (default=data/lm)')
     opts = parser.parse_args()
 
-    tm = load_translation_model(opts.tm, sys.maxint)
+    tm = PhraseTable.load(opts.tm, sys.maxint)
     lm = LanguageModel.load(opts.lm)
     french_sents = [tuple(line.strip().split()) for line in open(opts.input).readlines()]
     english_sents = [tuple(line.strip().split()) for line in sys.stdin]
@@ -45,16 +45,16 @@ if __name__ == "__main__":
             "ERROR: French and English files are not the same length! Only complete output can be graded!\n")
         sys.exit(1)
 
-    total_logprob = 0.0
+    total_log_prob = 0.0
     unaligned_sentences = 0
     for sent_num, (f, e) in enumerate(zip(french_sents, english_sents)):
         # compute p(e) under the LM
         lm_state = lm.begin()
-        lm_logprob = 0.0
+        lm_log_prob = 0.0
         for word in e + ("</s>",):
-            (lm_state, word_logprob) = lm.score(lm_state, word)
-            lm_logprob += word_logprob
-        total_logprob += lm_logprob
+            (lm_state, word_log_prob) = lm.score(lm_state, word)
+            lm_log_prob += word_log_prob
+        total_log_prob += lm_log_prob
 
         # alignments[i] is a list of all the phrases in f that could have
         # generated phrases starting at position i in e
@@ -67,7 +67,7 @@ if __name__ == "__main__":
                         for ei in xrange(len(e) + 1 - len(ephrase)):
                             ej = ei + len(ephrase)
                             if ephrase == e[ei:ej]:
-                                alignments[ei].append((ej, phrase.logprob, fi, fj))
+                                alignments[ei].append((ej, phrase.log_prob, fi, fj))
 
         # Compute sum of probability of all possible alignments by dynamic programming.
         # To do this, recursively compute the sum over all possible alignments for each
@@ -78,16 +78,16 @@ if __name__ == "__main__":
         chart[0][0] = 0.0
         for ei, sums in enumerate(chart[:-1]):
             for v in sums:
-                for ej, logprob, fi, fj in alignments[ei]:
+                for ej, log_prob, fi, fj in alignments[ei]:
                     if coverage(range(fi, fj)) & v == 0:
                         new_v = coverage(range(fi, fj)) | v
                         if new_v in chart[ej]:
-                            chart[ej][new_v] = log_add(chart[ej][new_v], sums[v] + logprob)
+                            chart[ej][new_v] = log_add(chart[ej][new_v], sums[v] + log_prob)
                         else:
-                            chart[ej][new_v] = sums[v] + logprob
+                            chart[ej][new_v] = sums[v] + log_prob
         goal = coverage(range(len(f)))
         if goal in chart[len(e)]:
-            total_logprob += chart[len(e)][goal]
+            total_log_prob += chart[len(e)][goal]
         else:
             sys.stderr.write("ERROR: COULD NOT ALIGN SENTENCE %d\n" % sent_num)
             unaligned_sentences += 1
@@ -98,5 +98,4 @@ if __name__ == "__main__":
             unaligned_sentences)
         sys.exit(1)
 
-    sys.stdout.write("%f\n" % total_logprob)
-
+    sys.stdout.write("%f\n" % total_log_prob)
