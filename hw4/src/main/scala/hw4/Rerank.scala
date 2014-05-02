@@ -4,7 +4,6 @@ import breeze.linalg.DenseVector
 import java.io.File
 import RichFile.enrichFile
 import breeze.optimize.{StochasticGradientDescent, StochasticDiffFunction, BatchDiffFunction, AdaptiveGradientDescent}
-import scala.collection.parallel.ParSeq
 
 /**
  * Contains a map from label to index, and from index to label
@@ -22,18 +21,35 @@ class Alphabet[T](private val labels: TraversableOnce[T]) {
   override def toString = labelOf.mkString(", ")
 }
 
+trait FeatureExtractor[T] {
+  def features(input: T): TraversableOnce[(String, Double)]
+}
+
+object HypothesisFeatureExtractor extends FeatureExtractor[Hypothesis] {
+  def features(input: Hypothesis): TraversableOnce[(String, Double)] = {
+    input.features ++ Seq(
+      "numNonAsciiWords" -> input.words.count(_.exists(127 <)).toDouble,
+      "length" -> input.words.size.toDouble,
+      "numCommas" -> input.words.count("," ==).toDouble
+    )
+  }
+}
+
 trait Model[-T] {
   def score(input: T): Double
 }
 
 case class Hypothesis(words: Array[String], features: Array[(String, Double)])
 
-case class RerankerModel(vocab: Alphabet[String], params: DenseVector[Double]) extends Model[Hypothesis] {
+case class RerankerModel(vocab: Alphabet[String],
+                         fe: FeatureExtractor[Hypothesis],
+                         params: DenseVector[Double])
+    extends Model[Hypothesis] {
   val size = params.size
 
   def values(input: Hypothesis): DenseVector[Double] = {
     val vs = DenseVector.zeros[Double](vocab.size)
-    input.features.foreach({ case (k, v) => vs(vocab.indexOf(k)) = v})
+    fe.features(input).foreach({ case (k, v) => vs(vocab.indexOf(k)) = v})
     vs
   }
 
@@ -66,33 +82,28 @@ case class RerankerDiffFunction(vocab: Alphabet[String], data: IndexedSeq[Seq[(H
   def sumPair(a: (Double, DenseVector[Double]), b: (Double, DenseVector[Double])) = (a._1 + b._1, a._2 + b._2)
 
   override def calculate(x: DenseVector[Double], batch: IndexedSeq[Int]): (Double, DenseVector[Double]) = {
-//    println(batch)
-    val m = RerankerModel(vocab, x)
-    lazy val zeros = DenseVector.zeros[Double](m.size)
-
-    val obsAndGrads: ParSeq[(Double, DenseVector[Double])] = batch.par.map(fromIdx).map { case ((a, aScore), (b, bScore)) =>
-      val diff: DenseVector[Double] = m.values(a) - m.values(b)
-      val score = m.params dot diff
-      if (((score >= 0) && (aScore < bScore)) || (score < 0 && aScore > bScore)) {
-//        println("miss", a, b, score, aScore, bScore)
-        (1.0, diff) // perceptron loss
-      } else {
-//        println("correct", a, b, score, aScore, bScore)
-        (0.0, zeros)
-      }
+    val m = RerankerModel(vocab, HypothesisFeatureExtractor, x)
+    val objsAndGrads = for (
+        ((a, aScore), (b, bScore)) <- batch.par.map(fromIdx);
+        diff = m.values(a) - m.values(b);
+        score = m.params dot diff
+        if ((score >= 0) && (aScore < bScore)) || (score < 0 && aScore > bScore) // wrong prediction
+        ) yield {
+      (1.0, diff) // perceptron loss, gradient
     }
     val n = 1.0 / batch.size
-    val (obj, grad) = obsAndGrads.reduce(sumPair)
+    val (obj, grad) = objsAndGrads.reduce(sumPair)
     println("objective: %s   gradnorm: %s".format(obj * n, grad.norm(2) * n))
     (obj, grad)
   }
 
+  /** 1-1 map from (0 until numPairsPerSentence * data.size) onto pairs of hypotheses */
   private def fromIdx(i: Int) = {
     val sentId = i / numPairsPerSentence
-    val sentHyps = data(sentId)
-    val remainder = i - numPairsPerSentence * sentId
+    val remainder = i % numPairsPerSentence
     val a = remainder / HYPOTHESES_PER_SENTENCE
     val b = remainder % HYPOTHESES_PER_SENTENCE
+    val sentHyps = data(sentId)
     (sentHyps(a), sentHyps(b))
   }
 
@@ -101,10 +112,10 @@ case class RerankerDiffFunction(vocab: Alphabet[String], data: IndexedSeq[Seq[(H
 
 object RerankerModel {
   val HYPOTHESES_PER_SENTENCE = 100
-  lazy val defaultVocab = new Alphabet(Set("p(e)", "p(e|f)", "p_lex(f|e)"))
-  lazy val default = RerankerModel(defaultVocab, DenseVector(1f, .5f, .5f))
-//  private val adaGrad = new AdaptiveGradientDescent.L2Regularization[DenseVector[Double]](0.0, 1.0, 100, 1e-8, 1e-8)
-  private val sgd = StochasticGradientDescent[DenseVector[Double]]()
+  lazy val defaultVocab = new Alphabet(Set("p(e)", "p(e|f)", "p_lex(f|e)", "numNonAsciiWords", "length", "numCommas"))
+//  lazy val default = RerankerModel(defaultVocab, HypothesisFeatureExtractor, DenseVector(1f, .5f, .5f))
+  private val adaGrad = new AdaptiveGradientDescent.L2Regularization[DenseVector[Double]](1.0, 1.0, 100, 1e-8, 1e-8)
+//  private val sgd = StochasticGradientDescent[DenseVector[Double]]()
 
 
   def loadHypotheses(file: File): Iterator[Seq[Hypothesis]] = {
@@ -122,8 +133,8 @@ object RerankerModel {
   def loadScores(file: File): Iterator[Seq[Double]] = file.lines.map(_.toDouble).grouped(HYPOTHESES_PER_SENTENCE)
 
   def train(diffFn: StochasticDiffFunction[DenseVector[Double]]): DenseVector[Double] = {
-//    adaGrad.minimize(diffFn, DenseVector.zeros(3))
-    sgd.minimize(diffFn, DenseVector.zeros[Double](3))
+    adaGrad.minimize(diffFn, DenseVector.zeros[Double](defaultVocab.size))
+//    sgd.minimize(diffFn, DenseVector.zeros[Double](defaultVocab.size))
   }
 }
 
@@ -142,7 +153,19 @@ object Train extends App {
 
 object Rerank extends App {
   import RerankerModel._
-  val model = RerankerModel(defaultVocab, DenseVector(86201.45706984798, -14638.535604530765, -34832.58844835954))
+  val model = RerankerModel(
+    defaultVocab,
+    HypothesisFeatureExtractor,
+    // p(e|f), numNonAsciiWords, p_lex(f|e), length, numCommas, p(e)
+    DenseVector(
+      1.357322141154833,
+      -0.10255545243388073,
+      -2.1378364025552887,
+      0.12915390814841818,
+      0.8853725580653389,
+      0.7157717221907849
+    )
+  )
 //  val hypothesisFile = new File("data/dev.100best")
 //  val outputFile = new File("dev.reranked")
   val hypothesisFile = new File("data/test.100best")
